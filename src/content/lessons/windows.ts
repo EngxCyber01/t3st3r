@@ -1,0 +1,128 @@
+import type { Lesson } from "@/types";
+
+export const windowsLessons: Lesson[] = [
+  {
+    id: "win-enum",
+    title: "Windows: First Enumeration After a Shell",
+    category: "windows",
+    categoryLabel: "Windows",
+    difficulty: "beginner",
+    summary: "The opening commands on a Windows host: identity, privileges, groups, system info, and network.",
+    estMinutes: 9,
+    methodology: ["MITRE ATT&CK: Discovery"],
+    objectives: ["Establish identity and token privileges", "Read system and patch level", "Map users, groups, and network"],
+    teacherIntro:
+      "Fresh Windows shell — same discipline as Linux. First: who are you, and crucially, what token privileges do you hold? Windows escalation often hinges on a single privilege like SeImpersonate rather than a kernel bug.",
+    why: "whoami /priv is the Windows equivalent of sudo -l in importance. A dangerous privilege can be a direct path to SYSTEM.",
+    notes: [
+      { heading: "Privileges matter most", body: "whoami /priv. SeImpersonatePrivilege or SeAssignPrimaryToken (common on service accounts) enables 'potato' impersonation to SYSTEM. SeBackup/SeRestore, SeDebug, and SeTakeOwnership are also high-value.", tone: "tip" },
+      { heading: "Know your context", body: "A service account (e.g. from a web app or MSSQL) often has SeImpersonate. A normal user usually doesn't — which changes your whole plan." },
+      { heading: "System info", body: "systeminfo gives OS build and hotfixes. It's useful but modern paths are usually misconfig/privilege-based, not missing-patch-based.", tone: "info" },
+    ],
+    commands: [
+      { id: "win-whoami-priv", command: "whoami /priv", platform: "windows", purpose: "List your token privileges.", why: "The presence of SeImpersonate/SeAssignPrimaryToken often means a direct route to SYSTEM.", exampleOutput: "SeImpersonatePrivilege        Enabled\nSeChangeNotifyPrivilege       Enabled", lookFor: ["SeImpersonatePrivilege", "SeAssignPrimaryTokenPrivilege", "SeBackup/SeRestore/SeDebug"], risk: "low", next: "If SeImpersonate is present, that's your primary lead.", tags: ["windows", "whoami", "privileges"] },
+      { id: "win-whoami-groups", command: "whoami /groups & net user %username%", platform: "windows", purpose: "Show group memberships and account details.", why: "Privileged groups (Administrators, Backup Operators, Remote Management Users) shape what you can do.", lookFor: ["Administrators / Backup Operators", "Remote Management Users (WinRM)"], risk: "low", tags: ["windows", "groups", "net"] },
+      { id: "win-systeminfo", command: "systeminfo", platform: "windows", purpose: "OS version, build, and installed hotfixes.", why: "Establishes patch level and architecture for context.", lookFor: ["OS build number", "Hotfix list", "Domain membership"], risk: "low", tags: ["windows", "systeminfo"] },
+    ],
+    lookFor: ["Token privileges", "Group memberships", "OS build", "Domain vs local"],
+    branches: [
+      { condition: "SeImpersonatePrivilege is present", outcome: "Pursue a potato-style impersonation to SYSTEM (authorized labs).", goto: { type: "lesson", id: "win-privesc" }, risk: "high" },
+      { condition: "You're in a privileged group", outcome: "Leverage the group (e.g. Backup Operators can read the SAM).", goto: { type: "lesson", id: "win-privesc" }, risk: "high" },
+      { condition: "Host is domain-joined", outcome: "Consider domain escalation via the AD workflow, not just local privesc.", goto: { type: "lesson", id: "ad-domain" } },
+    ],
+    commonMistakes: ["Jumping to kernel exploits before checking whoami /priv", "Ignoring group memberships"],
+    next: ["win-privesc", "win-creds"],
+    related: ["os-identification"],
+    keywords: ["windows", "enumeration", "whoami", "privileges", "seimpersonate"],
+  },
+  {
+    id: "win-privesc",
+    title: "Windows PrivEsc: Services, Tasks & Privileges",
+    category: "windows",
+    categoryLabel: "Windows",
+    difficulty: "intermediate",
+    summary: "The main local escalation paths: abusable service configs, scheduled tasks, token privileges, and AlwaysInstallElevated.",
+    estMinutes: 10,
+    methodology: ["MITRE ATT&CK: Privilege Escalation"],
+    objectives: ["Find unquoted paths and weak service perms", "Recognize token-privilege paths", "Check AlwaysInstallElevated"],
+    teacherIntro:
+      "Windows local escalation usually comes from misconfiguration: a service you can modify or restart, a writable binary path, a dangerous token privilege, or a policy like AlwaysInstallElevated. winPEAS finds most of these — but you should know what each means.",
+    why: "These are the paths that actually work on modern Windows. Understanding them lets you read a winPEAS report and immediately know which highlight is your ticket to SYSTEM.",
+    notes: [
+      { heading: "Service misconfigurations", body: "Unquoted service paths, weak service permissions (you can change the binPath), or a writable service executable all let you run code as the service account — often SYSTEM. Check with accesschk/winPEAS." },
+      { heading: "Token privileges", body: "SeImpersonate → PrintSpoofer/potato to SYSTEM. SeBackup/SeRestore → read the SAM/SYSTEM hives and extract hashes. Each privilege maps to a known technique." },
+      { heading: "AlwaysInstallElevated", body: "If both HKLM and HKCU registry values are 1, any user can install an MSI as SYSTEM — build a malicious MSI and run it.", tone: "tip" },
+      { heading: "Scheduled tasks", body: "A task running as a privileged user that executes a file you can write is the same idea as Linux cron.", tone: "info" },
+    ],
+    commands: [
+      { id: "win-aie", command: "reg query HKLM\\Software\\Policies\\Microsoft\\Windows\\Installer /v AlwaysInstallElevated & reg query HKCU\\Software\\Policies\\Microsoft\\Windows\\Installer /v AlwaysInstallElevated", platform: "windows", purpose: "Check the AlwaysInstallElevated policy.", why: "If both are 0x1, any MSI you run installs as SYSTEM.", lookFor: ["Both values = 0x1"], risk: "medium", next: "Build a malicious MSI (msfvenom) and execute it.", tags: ["windows", "alwaysinstallelevated", "msi"] },
+      { id: "win-services", command: "sc query state= all & accesschk.exe -uwcqv \"Users\" *", platform: "windows", purpose: "Enumerate services and find ones your user can modify.", why: "A modifiable service's binPath can be pointed at your payload and run as the service account.", lookFor: ["SERVICE_CHANGE_CONFIG for your user", "Unquoted paths with spaces", "Writable service binaries"], risk: "medium", tags: ["windows", "services", "accesschk"] },
+      { id: "win-printspoofer", command: "PrintSpoofer.exe -i -c cmd", platform: "windows", purpose: "Abuse SeImpersonate to get a SYSTEM shell (authorized labs).", whenToUse: "When whoami /priv shows SeImpersonatePrivilege enabled.", why: "Impersonation of the SYSTEM token is the standard escalation for service accounts.", lookFor: ["nt authority\\system prompt"], risk: "high", next: "You're SYSTEM — capture proof, then move to impact/credentials.", tags: ["windows", "printspoofer", "seimpersonate", "system"] },
+    ],
+    lookFor: ["Modifiable services / unquoted paths", "Dangerous token privileges", "AlwaysInstallElevated = 1", "Privileged scheduled tasks"],
+    branches: [
+      { condition: "You reached SYSTEM", outcome: "Dump credentials and assess domain impact; record proof.", goto: { type: "lesson", id: "win-creds" }, risk: "high" },
+    ],
+    exercise: {
+      id: "wpe-ex",
+      prompt: "whoami /priv shows SeImpersonatePrivilege: Enabled on a service account. What's the go-to escalation?",
+      options: ["A kernel exploit for the exact build", "PrintSpoofer / potato token impersonation to SYSTEM", "Brute forcing the Administrator password", "Nothing — that privilege is harmless"],
+      answerIndex: 1,
+      explanation: "SeImpersonatePrivilege on a service account is the classic setup for token-impersonation tools (PrintSpoofer, the 'potato' family), which impersonate the SYSTEM token to give you a SYSTEM shell. It's more reliable than chasing a kernel exploit and is one of the most common Windows lab escalations.",
+    },
+    next: ["win-creds"],
+    keywords: ["windows", "privesc", "services", "seimpersonate", "printspoofer", "alwaysinstallelevated"],
+  },
+  {
+    id: "win-creds",
+    title: "Windows: Hunting Credentials",
+    category: "windows",
+    categoryLabel: "Windows",
+    difficulty: "intermediate",
+    summary: "Where Windows hides credentials: SAM/LSASS, files, registry, and how access to them extends your reach.",
+    estMinutes: 7,
+    objectives: ["Know common credential locations", "Understand SAM/LSASS extraction (conceptually)", "Turn creds into lateral movement"],
+    teacherIntro:
+      "Once you're SYSTEM (or have the right privilege), Windows is full of credentials — local hashes in the SAM, live secrets in LSASS, passwords in files and the registry. These creds are how a single host becomes the whole domain.",
+    why: "Credential access is the bridge from 'I own this box' to 'I own the network'. A reused local admin hash can unlock every workstation.",
+    notes: [
+      { heading: "SAM + SYSTEM", body: "Local account hashes live in the SAM hive, encrypted with a key in SYSTEM. With SeBackup or SYSTEM you can read both and extract hashes offline (impacket-secretsdump)." },
+      { heading: "LSASS", body: "The LSASS process holds live credentials for logged-in users. Dumping it (in authorized tests) can reveal cleartext or reusable hashes. Modern hosts protect LSASS — note that." },
+      { heading: "Files & registry", body: "Search for unattend.xml, sysprep files, PowerShell history, saved RDP/creds, and registry autologon values. These are quiet, common wins.", tone: "tip" },
+      { heading: "Pass-the-hash", body: "An NTLM hash is often usable directly (nxc smb -H <hash>) without cracking — reuse before you crack.", tone: "teacher" },
+    ],
+    commands: [
+      { id: "win-secretsdump", command: "impacket-secretsdump -sam sam.save -system system.save LOCAL", platform: "kali", purpose: "Extract local hashes from saved SAM/SYSTEM hives.", why: "Yields local account NTLM hashes for reuse or cracking.", lookFor: ["Administrator NTLM hash", "Reusable local admin"], risk: "high", next: "Test the local admin hash across other hosts (pass-the-hash).", tags: ["windows", "secretsdump", "sam", "hashes"] },
+      { id: "win-cred-files", command: "findstr /si password *.xml *.ini *.txt *.config 2>nul & type %USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\PowerShell\\PSReadline\\ConsoleHost_history.txt", platform: "windows", purpose: "Search files and PowerShell history for credentials.", why: "Cleartext credentials in config files and history are extremely common.", lookFor: ["password= in configs", "creds in PS history"], risk: "low", tags: ["windows", "credentials", "files"] },
+    ],
+    lookFor: ["Local admin hash", "LSASS secrets", "Cleartext creds in files/registry", "Reusable hashes"],
+    branches: [
+      { condition: "You recovered a reusable admin credential/hash", outcome: "Test it across the network — this is how single-host access becomes domain-wide.", goto: { type: "lesson", id: "creds-reuse" }, risk: "critical" },
+    ],
+    next: ["creds-reuse", "ad-domain"],
+    keywords: ["windows", "credentials", "sam", "lsass", "secretsdump", "pass the hash"],
+  },
+  {
+    id: "win-winpeas",
+    title: "Using winPEAS Effectively",
+    category: "windows",
+    categoryLabel: "Windows",
+    difficulty: "beginner",
+    summary: "Run winPEAS, read its highlights, and map each to a known escalation technique.",
+    estMinutes: 5,
+    objectives: ["Run winPEAS", "Prioritize its highlighted findings", "Map findings to techniques"],
+    teacherIntro:
+      "winPEAS is the Windows counterpart to linpeas. It checks services, privileges, policies, credentials, and more, and highlights the promising ones. As always: it points, you decide.",
+    why: "It compresses hours of manual checks into one run — but only helps if you can interpret which highlight is actually exploitable and how.",
+    notes: [
+      { heading: "Priority areas", body: "Token privileges, service misconfigurations, AlwaysInstallElevated, stored credentials, and scheduled tasks. These map directly to the techniques in the Windows PrivEsc lesson." },
+      { heading: "Confirm before acting", body: "winPEAS can flag things that need context. Confirm the privilege/permission manually (whoami /priv, accesschk) before running an exploit.", tone: "teacher" },
+    ],
+    commands: [
+      { id: "win-peas-run", command: "winPEASx64.exe > winpeas.txt", platform: "windows", purpose: "Run winPEAS and save output.", why: "One pass surfaces most local escalation vectors.", lookFor: ["Red/green highlights", "Privilege and service sections", "Found credentials"], risk: "low", next: "Triage highlights against the PrivEsc techniques.", tags: ["windows", "winpeas", "enumeration"] },
+    ],
+    lookFor: ["Highlighted privileges/services", "Stored credentials", "Policy misconfigurations"],
+    next: ["win-privesc"],
+    keywords: ["winpeas", "windows", "privesc", "enumeration", "peass"],
+  },
+];

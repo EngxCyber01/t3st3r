@@ -1,0 +1,167 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Design tokens — RGB channels (space separated) so Tailwind
+   opacity modifiers work: rgb(var(--c-x) / <alpha>)
+   Dark is the primary theme (spec §6).
+   ============================================================ */
+:root,
+[data-theme="dark"] {
+  --c-base: 8 11 17; /* deepest background */
+  --c-surface: 13 18 27; /* panels */
+  --c-surface-2: 17 24 35;
+  --c-raised: 22 30 43; /* cards / hover */
+  --c-line: 32 42 58; /* borders */
+  --c-line-strong: 48 62 84;
+
+  --c-fg: 226 232 240; /* primary text */
+  --c-muted: 148 163 184; /* secondary text */
+  --c-subtle: 100 116 139; /* tertiary text */
+
+  --c-primary: 45 212 191; /* teal-400 — brand */
+  --c-primary-fg: 4 20 18; /* text on primary */
+  --c-primary-soft: 19 78 74;
+
+  --c-info: 96 165 250; /* blue */
+  --c-success: 52 211 153; /* green */
+  --c-caution: 250 204 21; /* yellow */
+  --c-elevated: 251 146 60; /* orange */
+  --c-critical: 248 113 113; /* red */
+  --c-teacher: 167 139 250; /* purple — teacher/AI */
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --c-base: 246 248 251;
+  --c-surface: 255 255 255;
+  --c-surface-2: 248 250 252;
+  --c-raised: 255 255 255;
+  --c-line: 226 232 240;
+  --c-line-strong: 203 213 225;
+
+  --c-fg: 15 23 42;
+  --c-muted: 71 85 105;
+  --c-subtle: 100 116 139;
+
+  --c-primary: 13 148 136; /* teal-600 for contrast on light */
+  --c-primary-fg: 240 253 250;
+  --c-primary-soft: 204 251 241;
+
+  --c-info: 37 99 235;
+  --c-success: 5 150 105;
+  --c-caution: 202 138 4;
+  --c-elevated: 234 88 12;
+  --c-critical: 220 38 38;
+  --c-teacher: 124 58 237;
+
+  color-scheme: light;
+}
+
+@layer base {
+  * {
+    border-color: rgb(var(--c-line));
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-base text-fg font-sans antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    min-height: 100vh;
+  }
+
+  /* Subtle ambient gradient behind the whole app */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(60rem 40rem at 88% -8%, rgb(var(--c-primary) / 0.06), transparent 60%),
+      radial-gradient(50rem 40rem at 4% 4%, rgb(var(--c-teacher) / 0.05), transparent 55%);
+    pointer-events: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-primary));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: rgb(var(--c-primary) / 0.28);
+    color: rgb(var(--c-fg));
+  }
+
+  /* Scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--c-line-strong)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgb(var(--c-line-strong) / 0.8);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--c-subtle) / 0.7);
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-line bg-surface shadow-card;
+  }
+  .panel {
+    @apply rounded-2xl border border-line bg-surface/80 backdrop-blur-sm shadow-panel;
+  }
+  .hairline {
+    @apply border-line;
+  }
+  /* Thin gradient divider */
+  .rule {
+    height: 1px;
+    background: linear-gradient(
+      to right,
+      transparent,
+      rgb(var(--c-line-strong) / 0.9),
+      transparent
+    );
+  }
+  .kbd {
+    @apply inline-flex h-5 min-w-5 items-center justify-center rounded border border-line bg-surface-2 px-1.5 font-mono text-[11px] font-medium text-muted;
+  }
+  .link-underline {
+    @apply underline decoration-line-strong underline-offset-4 hover:decoration-primary transition-colors;
+  }
+}
+
+/* Reduced motion (spec §57) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* When the user forces reduced motion via Settings */
+[data-reduced-motion="true"] * {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
+}

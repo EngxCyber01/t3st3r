@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+.icons_used.txt
+test/*.bundle.mjs
+*.log
+
+# Original spec/prompt docs (not part of the app)
+BUILD EXECUTION*
+MASTER SPECIFICATION*

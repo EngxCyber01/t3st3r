@@ -1,0 +1,165 @@
+import type { Lesson } from "@/types";
+
+export const adLessons: Lesson[] = [
+  {
+    id: "ad-domain",
+    title: "Active Directory: The Big Picture",
+    category: "ad",
+    categoryLabel: "Active Directory",
+    difficulty: "intermediate",
+    summary: "What AD is, how to recognize a domain from a scan, and the enumeration order that leads to attack paths.",
+    estMinutes: 9,
+    methodology: ["MITRE ATT&CK: Enterprise"],
+    objectives: ["Recognize an AD environment", "Understand the enumeration order", "Know where credentials take you"],
+    teacherIntro:
+      "Active Directory is the identity backbone of most Windows networks. Attacking it isn't about one exploit — it's about enumerating relationships (users, groups, computers, permissions) and finding a path from where you are to Domain Admin.",
+    why: "Once a target is 'a domain' rather than 'a host', the whole strategy changes: you think in terms of accounts and trust relationships, and small footholds compound into total compromise.",
+    notes: [
+      { heading: "Recognize it", body: "53/88/389/445 together (DNS/Kerberos/LDAP/SMB) on one host almost always means a Domain Controller. nxc smb will show the domain name and DC role." },
+      { heading: "Enumeration order", body: "DNS → SMB (users, shares, policy) → LDAP (full directory) → Kerberos (roasting). Then feed everything into BloodHound to reveal paths." },
+      { heading: "Credentials are the currency", body: "AD attacks are chains of credential access and reuse: get any account → enumerate → roast/relay/abuse an ACL → get a better account → repeat until DA.", tone: "teacher" },
+    ],
+    commands: [
+      { id: "ad-nxc-id", command: "nxc smb <TARGET>", platform: "kali", purpose: "Identify the domain, DC role, and host details.", why: "Confirms you're dealing with AD and gives you the domain name every other tool needs.", exampleOutput: "SMB  10.10.10.10  445  DC01  [*] Windows Server 2019 (name:DC01) (domain:corp.local) (signing:True)", lookFor: ["domain:corp.local", "DC hostname", "signing status"], risk: "low", next: "Enumerate SMB and LDAP for users.", tags: ["ad", "netexec", "domain"] },
+    ],
+    lookFor: ["Domain name", "DC identification", "Whether you have any credentials yet"],
+    branches: [
+      { condition: "You have no credentials", outcome: "Enumerate what's possible anonymously (SMB null, AS-REP roasting) to get a first account.", goto: { type: "lesson", id: "ad-kerberos" } },
+      { condition: "You have a credential", outcome: "Run BloodHound to map paths to Domain Admin.", goto: { type: "lesson", id: "ad-bloodhound" } },
+    ],
+    next: ["ad-smb", "ad-ldap", "ad-kerberos", "ad-bloodhound"],
+    keywords: ["active directory", "ad", "domain controller", "kerberos", "ldap"],
+  },
+  {
+    id: "ad-smb",
+    title: "AD Enumeration via SMB",
+    category: "ad",
+    categoryLabel: "Active Directory",
+    difficulty: "intermediate",
+    summary: "Use SMB to pull users, shares, and password policy — the raw material for every AD attack.",
+    estMinutes: 7,
+    objectives: ["Enumerate users and policy over SMB", "Find useful shares (SYSVOL/NETLOGON)", "Prepare data for spraying/roasting"],
+    teacherIntro:
+      "SMB is the workhorse of AD enumeration. Even with weak or no credentials it can yield the user list, password policy, and access to domain shares like SYSVOL that sometimes contain secrets.",
+    why: "The user list drives spraying and roasting; the password policy tells you how hard you can push; SYSVOL sometimes contains the legendary GPP cpassword or scripts with credentials.",
+    notes: [
+      { heading: "Users & policy", body: "nxc smb --users and --pass-pol (or enum4linux-ng -A). RID cycling with a valid cred fills gaps." },
+      { heading: "SYSVOL/NETLOGON", body: "Readable by any domain user. Search for scripts, and historically Groups.xml with an AES-decryptable 'cpassword'." },
+      { heading: "Shares beyond default", body: "Non-default shares often hold backups, deployment files, and credentials.", tone: "tip" },
+    ],
+    commands: [
+      { id: "ad-smb-users", command: "nxc smb <TARGET> -u <USER> -p <PASS> --users --pass-pol", platform: "kali", purpose: "List domain users and the password policy.", why: "Users + policy are prerequisites for safe spraying and for roasting.", lookFor: ["Full user list", "Lockout threshold", "Service accounts (svc-*)"], risk: "low", next: "Feed users into AS-REP/Kerberoasting and BloodHound.", tags: ["ad", "smb", "users", "policy"] },
+      { id: "ad-sysvol", command: "nxc smb <TARGET> -u <USER> -p <PASS> -M gpp_password", platform: "kali", purpose: "Check SYSVOL for Group Policy Preferences passwords.", why: "Legacy GPP passwords are AES-decryptable and sometimes still present.", lookFor: ["cpassword findings", "decrypted credentials"], risk: "medium", tags: ["ad", "sysvol", "gpp"] },
+    ],
+    lookFor: ["User list", "Password policy", "SYSVOL secrets", "Non-default shares"],
+    branches: [
+      { condition: "You have a user list", outcome: "AS-REP roast users, then Kerberoast with any credential.", goto: { type: "lesson", id: "ad-kerberos" } },
+    ],
+    next: ["ad-ldap", "ad-kerberos"],
+    keywords: ["ad", "smb", "sysvol", "gpp", "users", "netexec"],
+  },
+  {
+    id: "ad-ldap",
+    title: "AD Enumeration via LDAP",
+    category: "ad",
+    categoryLabel: "Active Directory",
+    difficulty: "intermediate",
+    summary: "Query the directory for users, groups, computers, and juicy attributes like SPNs and descriptions.",
+    estMinutes: 7,
+    objectives: ["Query LDAP for principals", "Find SPNs and roastable accounts", "Spot passwords in attributes"],
+    teacherIntro:
+      "LDAP is the directory itself. With even a low-priv account you can read a huge amount: every user and group, computer objects, and attributes that sometimes contain passwords or mark accounts as roastable.",
+    why: "LDAP data is the backbone of BloodHound's graph. It's also where you find the quiet wins — a password in a description field, or an account flagged 'no preauth'.",
+    notes: [
+      { heading: "Read broadly", body: "Enumerate users, groups (esp. Domain/Enterprise Admins), and computers. Note delegation settings and admin group membership." },
+      { heading: "Attribute gold", body: "description fields sometimes hold passwords; servicePrincipalName marks Kerberoastable accounts; userAccountControl flags AS-REP-roastable ones." },
+      { heading: "Let tools help", body: "nxc ldap with --kerberoast/--asreproast, or ldapdomaindump, gather this efficiently.", tone: "tip" },
+    ],
+    commands: [
+      { id: "ad-ldapdump", command: "ldapdomaindump -u 'corp.local\\<USER>' -p '<PASS>' <TARGET>", platform: "kali", purpose: "Dump the directory to browsable HTML/JSON.", why: "A fast, readable snapshot of users, groups, and computers.", lookFor: ["Privileged group members", "Descriptions with passwords", "Computer accounts"], risk: "low", tags: ["ad", "ldap", "ldapdomaindump"] },
+    ],
+    lookFor: ["Privileged group membership", "SPNs (Kerberoastable)", "No-preauth accounts (AS-REP)", "Passwords in attributes"],
+    next: ["ad-kerberos", "ad-bloodhound"],
+    keywords: ["ad", "ldap", "spn", "kerberoast", "asrep", "ldapdomaindump"],
+  },
+  {
+    id: "ad-kerberos",
+    title: "Kerberoasting & AS-REP Roasting",
+    category: "ad",
+    categoryLabel: "Active Directory",
+    difficulty: "advanced",
+    summary: "Two classic offline-cracking attacks that turn directory access into crackable credentials.",
+    estMinutes: 8,
+    methodology: ["MITRE ATT&CK: Credential Access"],
+    objectives: ["AS-REP roast pre-auth-disabled accounts", "Kerberoast SPN accounts", "Crack the results offline"],
+    teacherIntro:
+      "Kerberos has two well-known offline attacks. AS-REP roasting targets accounts with pre-authentication disabled (sometimes reachable with NO credentials). Kerberoasting targets service accounts with SPNs (needs any valid credential). Both give you a hash to crack offline.",
+    why: "Service accounts often have weak, non-expiring passwords and high privileges. Roasting them is one of the most reliable AD escalation routes.",
+    notes: [
+      { heading: "AS-REP roasting", body: "Accounts with 'Do not require Kerberos preauthentication' will hand out an encrypted AS-REP. GetNPUsers.py can request these — sometimes without any credential." },
+      { heading: "Kerberoasting", body: "Any authenticated user can request service tickets (TGS) for SPN accounts; the ticket is encrypted with the service account's password hash. Crack it offline." },
+      { heading: "Crack & reuse", body: "hashcat -m 18200 (AS-REP) / -m 13100 (Kerberoast). A cracked service-account password often unlocks lateral movement or is already privileged.", tone: "teacher" },
+    ],
+    commands: [
+      { id: "ad-asrep", command: "impacket-GetNPUsers corp.local/ -usersfile users.txt -no-pass -dc-ip <TARGET>", platform: "kali", purpose: "Request AS-REP hashes for pre-auth-disabled users.", why: "Can yield crackable hashes with no credentials at all.", lookFor: ["$krb5asrep$ hashes"], risk: "medium", next: "Crack with hashcat -m 18200.", tags: ["ad", "asrep", "kerberos", "impacket"] },
+      { id: "ad-kerberoast", command: "impacket-GetUserSPNs corp.local/<USER>:<PASS> -dc-ip <TARGET> -request", platform: "kali", purpose: "Request TGS hashes for SPN (service) accounts.", why: "Turns any valid credential into crackable service-account hashes.", lookFor: ["$krb5tgs$ hashes", "svc-* accounts"], risk: "medium", next: "Crack with hashcat -m 13100; reuse the result.", tags: ["ad", "kerberoast", "spn", "impacket"] },
+    ],
+    lookFor: ["$krb5asrep$ / $krb5tgs$ hashes", "Service accounts", "Weak, crackable passwords"],
+    branches: [
+      { condition: "You cracked a service account", outcome: "Test its reach; it may be privileged or enable further roasting/movement.", goto: { type: "lesson", id: "ad-bloodhound" }, risk: "high" },
+    ],
+    next: ["ad-bloodhound", "ad-attackpaths"],
+    keywords: ["kerberoast", "as-rep", "asrep", "kerberos", "impacket", "spn"],
+  },
+  {
+    id: "ad-bloodhound",
+    title: "BloodHound: Finding the Path",
+    category: "ad",
+    categoryLabel: "Active Directory",
+    difficulty: "advanced",
+    summary: "Collect AD data and let BloodHound graph the shortest path from your foothold to Domain Admin.",
+    estMinutes: 8,
+    objectives: ["Collect data with a SharpHound-style collector", "Read attack paths", "Prioritize abusable edges"],
+    teacherIntro:
+      "AD is a graph of who-can-do-what-to-whom. BloodHound ingests collected data and literally draws the path from your compromised account to Domain Admin, highlighting each abusable relationship along the way.",
+    why: "Manually spotting that 'user A can reset user B's password, who is in a group with GenericAll over the DA group' is nearly impossible. BloodHound makes these chains obvious.",
+    notes: [
+      { heading: "Collect", body: "Run a collector (bloodhound-python or SharpHound) with a valid credential to gather users, groups, sessions, ACLs, and more into JSON." },
+      { heading: "Read the graph", body: "Mark your owned principal, then run 'Shortest Path to Domain Admins'. Each edge (MemberOf, GenericAll, WriteDACL, ForceChangePassword…) is an abuse primitive with a known technique." },
+      { heading: "Prioritize", body: "Favor edges you can abuse right now with what you have. The tool shows possibilities; you choose the safest, in-scope one.", tone: "teacher" },
+    ],
+    commands: [
+      { id: "ad-bhpython", command: "bloodhound-python -u <USER> -p <PASS> -d corp.local -ns <TARGET> -c All", platform: "kali", purpose: "Collect AD data remotely for BloodHound.", why: "Produces the JSON BloodHound needs, from Linux, without touching a Windows host.", flags: [{ flag: "-c All", meaning: "All collection methods" }, { flag: "-ns", meaning: "DC to use as name server" }], lookFor: ["JSON files to import", "Session/ACL data"], risk: "low", next: "Import into BloodHound and run shortest-path queries.", tags: ["ad", "bloodhound", "sharphound"] },
+    ],
+    lookFor: ["Shortest path to DA", "Abusable ACL edges", "Kerberoastable/DCSync-capable principals"],
+    next: ["ad-attackpaths"],
+    keywords: ["bloodhound", "sharphound", "attack path", "ad", "graph"],
+  },
+  {
+    id: "ad-attackpaths",
+    title: "AD Attack Paths & DCSync",
+    category: "ad",
+    categoryLabel: "Active Directory",
+    difficulty: "advanced",
+    summary: "How individual edges chain into domain compromise, ending in DCSync to pull every hash.",
+    estMinutes: 8,
+    objectives: ["Understand common abuse edges", "See how they chain", "Know what DCSync means"],
+    teacherIntro:
+      "Domain compromise is a chain, not a single exploit. BloodHound shows edges; here we cover what the common ones mean and how they combine — ending at DCSync, where sufficient rights let you ask the DC for every account's hash.",
+    why: "Recognizing that a mundane 'ForceChangePassword' edge is a step toward DA is the whole game. Chaining is where AD attacks live.",
+    notes: [
+      { heading: "Common edges", body: "GenericAll/GenericWrite (take over an object), WriteDACL (grant yourself rights), ForceChangePassword (reset a user), AddMember (join a group). Each is a documented abuse." },
+      { heading: "Chaining", body: "Reset user B → B is in a group with WriteDACL over the DA group → grant yourself membership → you're effectively DA. BloodHound shows the whole chain." },
+      { heading: "DCSync", body: "With replication rights (often held by DA or specifically delegated), secretsdump can pull the krbtgt and every account hash from the DC — full domain compromise. Handle with care and stay in scope.", tone: "warning" },
+    ],
+    commands: [
+      { id: "ad-dcsync", command: "impacket-secretsdump 'corp.local/<USER>:<PASS>@<TARGET>' -just-dc", platform: "kali", purpose: "DCSync: replicate credentials from the DC (with rights).", why: "Yields krbtgt and all account hashes — total domain compromise, and the basis for golden tickets.", lookFor: ["krbtgt hash", "Administrator hash", "all domain hashes"], risk: "critical", next: "Document impact conservatively; this is game over for the domain.", tags: ["ad", "dcsync", "secretsdump", "krbtgt"] },
+    ],
+    lookFor: ["Chainable edges to DA", "Replication rights (DCSync)", "krbtgt access"],
+    branches: [
+      { condition: "You achieved DCSync / DA", outcome: "Domain fully compromised — capture proof, record impact, and move toward reporting.", goto: { type: "phase", id: "impact" }, risk: "critical" },
+    ],
+    next: ["report-findings"],
+    keywords: ["dcsync", "attack path", "genericall", "writedacl", "krbtgt", "domain admin"],
+  },
+];
