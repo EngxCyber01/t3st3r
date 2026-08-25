@@ -37,9 +37,12 @@ export default defineConfig(({ command }) => {
           // SPA offline routing: serve the app shell for any navigation.
           navigateFallback: `${base}index.html`,
           cleanupOutdatedCaches: true,
-          // Leave skipWaiting/clientsClaim OFF (Workbox defaults): a new version
-          // is fetched in the background and applied on the next fresh open, so an
-          // open tab never breaks on a hashed-chunk mismatch after a redeploy.
+          // Take control of pages as soon as the SW activates so we consistently
+          // serve the (self-consistent) precache instead of the browser's flaky
+          // HTTP cache. skipWaiting stays OFF, so a NEW version is fetched in the
+          // background and only applied on the next fresh open — an already-open
+          // tab never breaks on a hashed-chunk mismatch after a redeploy.
+          clientsClaim: true,
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

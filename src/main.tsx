@@ -4,6 +4,20 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./index.css";
 
+// Self-heal a stale cached page: if a lazily-loaded chunk fails to load (e.g. an
+// old index.html cached by the browser references chunks a new deploy purged),
+// reload ONCE to fetch the fresh assets. Guarded so it can never loop.
+window.addEventListener("vite:preloadError", () => {
+  try {
+    if (!sessionStorage.getItem("pt.reloadedOnce")) {
+      sessionStorage.setItem("pt.reloadedOnce", "1");
+      window.location.reload();
+    }
+  } catch {
+    window.location.reload();
+  }
+});
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter
